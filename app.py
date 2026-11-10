@@ -1,9 +1,9 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import os
 import shutil
 import zipfile
 import re
+import time
 from pypdf import PdfReader, PdfWriter
 import pdf2image
 import pytesseract
@@ -11,7 +11,7 @@ import pytesseract
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Nexus OS | OCR Avançado", page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
 
-# --- CUSTOM CSS COM ANIMAÇÃO ---
+# --- CUSTOM CSS COM ANIMAÇÕES ---
 st.markdown("""
     <style>
     @keyframes neonGlow {
@@ -34,86 +34,30 @@ st.markdown("""
         font-weight: 500;
         margin-bottom: 1.8rem;
     }
+    @keyframes fadeOutMeme {
+        0% { opacity: 1; transform: scale(1); }
+        60% { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(0.95); display: none; }
+    }
+    .meme-popup {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        animation: fadeOutMeme 5s forwards;
+    }
+    .meme-popup img {
+        max-width: 340px;
+        border-radius: 12px;
+        box-shadow: 0 0 25px rgba(0, 230, 118, 0.45);
+        border: 2px solid #00e676;
+    }
     [data-testid="stSidebar"] { display: none; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- JOGO DO PULA-PULA INTERATIVO ---
-JOGO_HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-    body { margin: 0; overflow: hidden; background-color: #121212; color: #00e676; font-family: 'Courier New', Courier, monospace; text-align: center; user-select: none; }
-    canvas { background-color: #1e1e1e; border: 2px solid #00e676; border-radius: 8px; margin-top: 5px; cursor: pointer; box-shadow: 0 0 15px rgba(0, 230, 118, 0.2); }
-    #msg { font-size: 13px; font-weight: bold; margin-top: 4px; color: #90caf9; }
-</style>
-</head>
-<body>
-    <div id="msg">🎮 MODO ESPERA: Pressione [ESPAÇO] ou clique na tela para pular!</div>
-    <canvas id="gameCanvas" width="600" height="150"></canvas>
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        let playerY = 110, playerVy = 0, gravity = 0.65, isJumping = false;
-        let blockX = 600, score = 0, speed = 4.5;
-
-        function jump() {
-            if (!isJumping) {
-                playerVy = -11;
-                isJumping = true;
-            }
-        }
-
-        document.addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); });
-        canvas.addEventListener('mousedown', jump);
-        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); });
-
-        function update() {
-            ctx.clearRect(0, 0, 600, 150);
-
-            playerVy += gravity;
-            playerY += playerVy;
-            if (playerY >= 110) {
-                playerY = 110;
-                isJumping = false;
-            }
-
-            ctx.fillStyle = '#00e676';
-            ctx.fillRect(60, playerY, 20, 20);
-
-            blockX -= speed;
-            if (blockX < -20) {
-                blockX = 600;
-                score += 10;
-                speed += 0.15;
-            }
-
-            ctx.fillStyle = '#ff1744';
-            ctx.fillRect(blockX, 110, 20, 20);
-
-            ctx.strokeStyle = '#00e676';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(0, 130);
-            ctx.lineTo(600, 130);
-            ctx.stroke();
-
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 15px Courier New';
-            ctx.fillText('SCORE: ' + score, 15, 25);
-
-            if (blockX < 80 && blockX > 40 && playerY > 90) {
-                score = 0;
-                speed = 4.5;
-                blockX = 600;
-            }
-        }
-        setInterval(update, 20);
-    </script>
-</body>
-</html>
-"""
+# Link direto para a imagem do meme
+URL_MEME = "https://i.imgflip.com/1m9k2x.jpg"
 
 # --- REGEX OCR ---
 @st.cache_data
@@ -121,6 +65,9 @@ def get_regex():
     regex_ordem = re.compile(r'(?:ordem|os|o\s*s|o\s*n)[\s:#№]*([0-9]{9})', re.IGNORECASE)
     regex_fim = re.compile(r'fim\s+d[eo]\s+relat[óoa]rio', re.IGNORECASE)
     return regex_ordem, regex_fim
+
+# --- ESPAÇO PARA O MEME NO TOPO ---
+espaco_meme = st.empty()
 
 # --- CABEÇALHO ---
 st.markdown('<div class="main-banner">🔥 Bora Randy, tem que escanear todas as ordens!</div>', unsafe_allow_html=True)
@@ -143,10 +90,6 @@ if arquivo_carregado is not None:
             
         reader = PdfReader(input_pdf_path)
         total_pages = len(reader.pages)
-        
-        # Jogo interativo na espera
-        st.markdown("### 🕹️ Sala de Espera")
-        components.html(JOGO_HTML, height=180)
         
         # Painel de métricas
         st.markdown("### ⚙️ Monitor de Processamento")
@@ -207,6 +150,14 @@ if arquivo_carregado is not None:
                         zipf.write(os.path.join(root, arquivo), arcname=arquivo)
         
         status_text.empty()
+        
+        # Exibe o meme animado que se esvai suavemente durante 5 segundos
+        espaco_meme.markdown(f'''
+            <div class="meme-popup">
+                <img src="{URL_MEME}" alt="Muito Bem! Mandou bem demais!">
+            </div>
+        ''', unsafe_allow_html=True)
+        
         st.balloons()
         st.success(f"🎯 Concluído! Todas as {total_os_encontradas} ordens foram escaneadas e separadas com sucesso!")
         
@@ -220,3 +171,7 @@ if arquivo_carregado is not None:
                 type="primary",
                 use_container_width=True
             )
+            
+        # Limpa o placeholder no backend após a transição visual
+        time.sleep(5)
+        espaco_meme.empty()
