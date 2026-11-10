@@ -11,7 +11,7 @@ import pytesseract
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Nexus OS | OCR Avançado", page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
 
-# --- CUSTOM CSS COM ANIMAÇÕES ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
     @keyframes neonGlow {
@@ -34,30 +34,9 @@ st.markdown("""
         font-weight: 500;
         margin-bottom: 1.8rem;
     }
-    @keyframes fadeOutMeme {
-        0% { opacity: 1; transform: scale(1); }
-        60% { opacity: 1; transform: scale(1); }
-        100% { opacity: 0; transform: scale(0.95); display: none; }
-    }
-    .meme-popup {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        margin-bottom: 1.5rem;
-        animation: fadeOutMeme 5s forwards;
-    }
-    .meme-popup img {
-        max-width: 340px;
-        border-radius: 12px;
-        box-shadow: 0 0 25px rgba(0, 230, 118, 0.45);
-        border: 2px solid #00e676;
-    }
     [data-testid="stSidebar"] { display: none; }
     </style>
 """, unsafe_allow_html=True)
-
-# Link direto para a imagem do meme
-URL_MEME = "https://i.imgflip.com/1m9k2x.jpg"
 
 # --- REGEX OCR ---
 @st.cache_data
@@ -66,12 +45,12 @@ def get_regex():
     regex_fim = re.compile(r'fim\s+d[eo]\s+relat[óoa]rio', re.IGNORECASE)
     return regex_ordem, regex_fim
 
-# --- ESPAÇO PARA O MEME NO TOPO ---
-espaco_meme = st.empty()
-
 # --- CABEÇALHO ---
 st.markdown('<div class="main-banner">🔥 Bora Randy, tem que escanear todas as ordens!</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-banner">Carregue o arquivo consolidado para separar e empacotar todos os documentos automaticamente.</div>', unsafe_allow_html=True)
+
+# Espaço exclusivo para exibir a foto
+espaco_meme = st.empty()
 
 # --- ÁREA DE UPLOAD ---
 arquivo_carregado = st.file_uploader("📂 Arraste o arquivo PDF único aqui:", type=["pdf"])
@@ -150,18 +129,10 @@ if arquivo_carregado is not None:
                         zipf.write(os.path.join(root, arquivo), arcname=arquivo)
         
         status_text.empty()
-        
-        # Exibe o meme animado que se esvai suavemente durante 5 segundos
-        espaco_meme.markdown(f'''
-            <div class="meme-popup">
-                <img src="{URL_MEME}" alt="Muito Bem! Mandou bem demais!">
-            </div>
-        ''', unsafe_allow_html=True)
-        
         st.balloons()
         st.success(f"🎯 Concluído! Todas as {total_os_encontradas} ordens foram escaneadas e separadas com sucesso!")
         
-        # Botão de download central
+        # Botão de download
         with open(ZIP_PATH, "rb") as fp:
             st.download_button(
                 label="⬇️ BAIXAR TODAS AS ORDENS EM ZIP",
@@ -172,6 +143,11 @@ if arquivo_carregado is not None:
                 use_container_width=True
             )
             
-        # Limpa o placeholder no backend após a transição visual
-        time.sleep(5)
-        espaco_meme.empty()
+        # Exibe a foto diretamente do arquivo local usando a função nativa
+        if os.path.exists("meme.jpg"):
+            with espaco_meme.container():
+                c1, c2, c3 = st.columns([1, 1, 1])
+                with c2:
+                    st.image("meme.jpg", width=350)
+            time.sleep(5)
+            espaco_meme.empty()
