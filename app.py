@@ -51,24 +51,20 @@ def extrair_numero_os(texto):
     Tolera espaços no meio do número (ex: '311053 788' -> '311053788')
     e varre o cabeçalho mesmo quando a palavra 'Ordem' estiver em outra linha.
     """
-    # Procura candidatos de 9 dígitos começando com 3 (com ou sem espaços)
     candidatos = re.findall(r'\b(3\d{2}[\s.-]*\d{3}[\s.-]*\d{3})\b', texto)
     for c in candidatos:
         limpo = re.sub(r'\D', '', c)
         if len(limpo) == 9:
             return limpo
 
-    # Procura no cabeçalho após normalizar espaços entre dígitos
     cabecalho = texto[:1600]
     cabecalho_normalizado = re.sub(r'(\d)\s+(\d)', r'\1\2', cabecalho)
     cabecalho_normalizado = re.sub(r'(\d)\s+(\d)', r'\1\2', cabecalho_normalizado)
     
-    # Busca 'Ordem' seguida pelo número de 9 dígitos
     match_ordem = re.search(r'(?:ordem|os|o\s*s)[\s\S]{0,120}?\b(3\d{8})\b', cabecalho_normalizado, re.IGNORECASE)
     if match_ordem:
         return match_ordem.group(1)
 
-    # Fallback: qualquer número de 9 dígitos iniciado em 3 no cabeçalho
     match_direto = re.search(r'\b(3\d{8})\b', cabecalho_normalizado)
     if match_direto:
         return match_direto.group(1)
@@ -125,22 +121,7 @@ if arquivo_carregado is not None:
         current_os_number = None
         current_writer = None
         current_page_count = 0
-        lista_ordens = []  # Armazena registros para a tabela final
-
-        def salvar_ordem_atual():
-            nonlocal current_writer, current_os_number, current_page_count
-            if current_writer and current_os_number:
-                caminho_saida = os.path.join(OUTPUT_DIR, f"{current_os_number}.pdf")
-                with open(caminho_saida, "wb") as f_out:
-                    current_writer.write(f_out)
-                lista_ordens.append({
-                    "Ordem de Serviço (OS)": current_os_number,
-                    "Total de Páginas": current_page_count,
-                    "Tipo de Ordem": "Página Única" if current_page_count == 1 else "Múltiplas Páginas"
-                })
-                current_writer = None
-                current_os_number = None
-                current_page_count = 0
+        lista_ordens = []
 
         # --- LOOP OCR ---
         for page_num in range(total_pages):
@@ -160,39 +141,66 @@ if arquivo_carregado is not None:
             tem_fim = checar_fim_relatorio(texto_ocr)
 
             # CRITÉRIOS DE SEPARAÇÃO:
-            # 1. Se detectou uma nova OS diferente da atual -> Salva a anterior e abre nova
-            # 2. Se a página indica 'Página 1' -> Salva a anterior e abre nova
             nova_ordem_iniciou = (
                 (os_detectada and os_detectada != current_os_number) or 
                 (eh_pagina_1 and current_os_number is not None)
             )
 
             if nova_ordem_iniciou:
-                salvar_ordem_atual()
+                if current_writer and current_os_number:
+                    caminho_saida = os.path.join(OUTPUT_DIR, f"{current_os_number}.pdf")
+                    with open(caminho_saida, "wb") as f_out:
+                        current_writer.write(f_out)
+                    lista_ordens.append({
+                        "Ordem de Serviço (OS)": current_os_number,
+                        "Total de Páginas": current_page_count,
+                        "Tipo de Ordem": "Página Única" if current_page_count == 1 else "Múltiplas Páginas"
+                    })
+                    current_writer = None
+                    current_os_number = None
+                    current_page_count = 0
 
-            # Se estamos abrindo uma nova ordem
+            # Inicializa novo agrupador para a ordem identificada
             if current_writer is None:
                 current_os_number = os_detectada if os_detectada else f"OS_DESCONHECIDA_{page_num + 1}"
                 current_writer = PdfWriter()
                 current_page_count = 0
 
-            # Adiciona a página atual
             current_writer.add_page(reader.pages[page_num])
             current_page_count += 1
 
-            # 3. Se atingiu o 'Fim do relatório' e temos uma ordem ativa -> Fecha imediatamente
+            # Finaliza caso o fim do relatório tenha sido detectado
             if tem_fim:
-                salvar_ordem_atual()
+                if current_writer and current_os_number:
+                    caminho_saida = os.path.join(OUTPUT_DIR, f"{current_os_number}.pdf")
+                    with open(caminho_saida, "wb") as f_out:
+                        current_writer.write(f_out)
+                    lista_ordens.append({
+                        "Ordem de Serviço (OS)": current_os_number,
+                        "Total de Páginas": current_page_count,
+                        "Tipo de Ordem": "Página Única" if current_page_count == 1 else "Múltiplas Páginas"
+                    })
+                    current_writer = None
+                    current_os_number = None
+                    current_page_count = 0
 
-            # Atualização dos mostradores
+            # Atualização dos mostradores em tela
             progress_bar.progress((page_num + 1) / total_pages)
             met_pag.metric("Páginas Processadas", f"{page_num + 1} / {total_pages}")
             met_os.metric("Ordens Extraídas", str(len(lista_ordens) + (1 if current_writer else 0)))
 
-        # Salva a última ordem se ainda estiver aberta
-        salvar_ordem_atual()
+        # Salva a última ordem pendente se houver
+        if current_writer and current_os_number:
+            caminho_saida = os.path.join(OUTPUT_DIR, f"{current_os_number}.pdf")
+            with open(caminho_saida, "wb") as f_out:
+                current_writer.write(f_out)
+            lista_ordens.append({
+                "Ordem de Serviço (OS)": current_os_number,
+                "Total de Páginas": current_page_count,
+                "Tipo de Ordem": "Página Única" if current_page_count == 1 else "Múltiplas Páginas"
+            })
 
-        # Compactação em ZIP
+        # Compactação final
         status_text.text("📦 Compactando documentos individuais...")
         with zipfile.ZipFile(ZIP_PATH, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, _, arquivos in os.walk(OUTPUT_DIR):
@@ -202,7 +210,7 @@ if arquivo_carregado is not None:
 
         status_text.empty()
 
-        # Banner com balões e meme de 5 segundos
+        # Finalização com balões e meme por 5 segundos
         st.balloons()
         if os.path.exists("meme.jpg"):
             with espaco_meme.container():
@@ -214,7 +222,7 @@ if arquivo_carregado is not None:
 
         st.success(f"🎯 Escaneamento concluído! Total de {len(lista_ordens)} ordens separadas com sucesso.")
 
-        # Botão de Download Central
+        # Download do ZIP
         with open(ZIP_PATH, "rb") as fp:
             st.download_button(
                 label="⬇️ BAIXAR TODAS AS ORDENS EM ZIP",
@@ -225,24 +233,21 @@ if arquivo_carregado is not None:
                 use_container_width=True
             )
 
-        # --- ÁREA DE AUDITORIA E RELATÓRIO DE PÁGINAS ---
+        # Relatório de auditoria com tabela
         st.divider()
         st.subheader("📋 Auditoria Geral das Ordens Separadas")
 
         if lista_ordens:
             df = pd.DataFrame(lista_ordens)
-            
             total_os = len(df)
             unicas = len(df[df["Total de Páginas"] == 1])
             multiplas = len(df[df["Total de Páginas"] > 1])
 
-            # Cartões de resumo
             c_tot, c_uni, c_mul = st.columns(3)
             c_tot.metric("Total de Ordens", total_os)
             c_uni.metric("Ordens com 1 Página", unicas)
             c_mul.metric("Ordens com Mais de 1 Página", multiplas)
 
-            # Tabela detalhada
             st.dataframe(
                 df,
                 use_container_width=True,
