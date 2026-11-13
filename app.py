@@ -71,9 +71,19 @@ def extrair_numero_os(texto):
     return None
 
 def checar_inicio_ordem(texto):
-    """Detecta se o cabeçalho indica que esta página é a Página 1 de uma nova ordem."""
+    """
+    Detecta se é o início de uma nova ordem de 3 formas:
+    1. Lê explicitamente 'Página 1' no cabeçalho.
+    2. Encontra o campo 'Solicitante:' (exclusivo da pág 1).
+    3. Encontra o campo 'Descrição da Ordem' (exclusivo da pág 1).
+    """
     cabecalho = texto[:1200]
-    return bool(re.search(r'p[áa]g(?:ina)?\.?\s*1\b', cabecalho, re.IGNORECASE))
+    
+    tem_pag_1 = bool(re.search(r'p[áa]g(?:ina)?\.?\s*1\b', cabecalho, re.IGNORECASE))
+    tem_solicitante = bool(re.search(r'solicitante\s*:', texto, re.IGNORECASE))
+    tem_desc_ordem = bool(re.search(r'descri[çc][ãa]o\s+da\s+ordem', texto, re.IGNORECASE))
+    
+    return tem_pag_1 or tem_solicitante or tem_desc_ordem
 
 # --- CABEÇALHO ---
 st.markdown('<div class="main-banner">🔥 Bora Randy, tem que escanear todas as ordens!</div>', unsafe_allow_html=True)
@@ -131,13 +141,13 @@ if arquivo_carregado is not None:
             texto_ocr = pytesseract.image_to_string(imagens[0], lang='por') if imagens else ""
 
             os_detectada = extrair_numero_os(texto_ocr)
-            eh_pagina_1 = checar_inicio_ordem(texto_ocr)
+            inicio_confirmado = checar_inicio_ordem(texto_ocr)
 
-            # O sistema agora SÓ corta o documento se encontrar uma nova Página 1 
+            # O sistema corta o documento se encontrar uma nova Página 1 (ou layout de pág 1)
             # ou se o número da OS mudar. "Fim do relatório" é ignorado na separação.
             nova_ordem_iniciou = (
                 (os_detectada and os_detectada != current_os_number) or 
-                (eh_pagina_1 and current_writer is not None)
+                (inicio_confirmado and current_writer is not None)
             )
 
             if nova_ordem_iniciou:
