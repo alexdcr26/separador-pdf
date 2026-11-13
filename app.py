@@ -48,8 +48,7 @@ st.markdown("""
 def extrair_numero_os(texto):
     """
     Extrai com alta precisão o número da Ordem Fogás (9 dígitos iniciando com 3).
-    Tolera espaços no meio do número (ex: '311053 788' -> '311053788')
-    e varre o cabeçalho mesmo quando a palavra 'Ordem' estiver em outra linha.
+    Tolera espaços no meio do número (ex: '311053 788' -> '311053788').
     """
     candidatos = re.findall(r'\b(3\d{2}[\s.-]*\d{3}[\s.-]*\d{3})\b', texto)
     for c in candidatos:
@@ -75,11 +74,6 @@ def checar_inicio_ordem(texto):
     """Detecta se o cabeçalho indica que esta página é a Página 1 de uma nova ordem."""
     cabecalho = texto[:1200]
     return bool(re.search(r'p[áa]g(?:ina)?\.?\s*1\b', cabecalho, re.IGNORECASE))
-
-def checar_fim_relatorio(texto):
-    """Detecta indicadores de fim de relatório com tolerância a assinaturas sobre o texto."""
-    rodape = texto[-1500:]
-    return bool(re.search(r'(?:fim\s*d[eo]\s*relat|fim\s*relat|conclus[ãa]o\s*d[eo]\s*relat)', rodape, re.IGNORECASE))
 
 # --- CABEÇALHO ---
 st.markdown('<div class="main-banner">🔥 Bora Randy, tem que escanear todas as ordens!</div>', unsafe_allow_html=True)
@@ -138,12 +132,12 @@ if arquivo_carregado is not None:
 
             os_detectada = extrair_numero_os(texto_ocr)
             eh_pagina_1 = checar_inicio_ordem(texto_ocr)
-            tem_fim = checar_fim_relatorio(texto_ocr)
 
-            # CRITÉRIOS DE SEPARAÇÃO:
+            # O sistema agora SÓ corta o documento se encontrar uma nova Página 1 
+            # ou se o número da OS mudar. "Fim do relatório" é ignorado na separação.
             nova_ordem_iniciou = (
                 (os_detectada and os_detectada != current_os_number) or 
-                (eh_pagina_1 and current_os_number is not None)
+                (eh_pagina_1 and current_writer is not None)
             )
 
             if nova_ordem_iniciou:
@@ -156,40 +150,27 @@ if arquivo_carregado is not None:
                         "Total de Páginas": current_page_count,
                         "Tipo de Ordem": "Página Única" if current_page_count == 1 else "Múltiplas Páginas"
                     })
-                    current_writer = None
-                    current_os_number = None
-                    current_page_count = 0
+                # Reseta para iniciar o novo agrupamento
+                current_writer = None
+                current_os_number = None
+                current_page_count = 0
 
-            # Inicializa novo agrupador para a ordem identificada
+            # Inicializa o agrupador da ordem detectada ou de uma página sem OS aparente
             if current_writer is None:
                 current_os_number = os_detectada if os_detectada else f"OS_DESCONHECIDA_{page_num + 1}"
                 current_writer = PdfWriter()
                 current_page_count = 0
 
+            # Anexa a página atual (Página 1, 2, 3... sempre cairão aqui)
             current_writer.add_page(reader.pages[page_num])
             current_page_count += 1
-
-            # Finaliza caso o fim do relatório tenha sido detectado
-            if tem_fim:
-                if current_writer and current_os_number:
-                    caminho_saida = os.path.join(OUTPUT_DIR, f"{current_os_number}.pdf")
-                    with open(caminho_saida, "wb") as f_out:
-                        current_writer.write(f_out)
-                    lista_ordens.append({
-                        "Ordem de Serviço (OS)": current_os_number,
-                        "Total de Páginas": current_page_count,
-                        "Tipo de Ordem": "Página Única" if current_page_count == 1 else "Múltiplas Páginas"
-                    })
-                    current_writer = None
-                    current_os_number = None
-                    current_page_count = 0
 
             # Atualização dos mostradores em tela
             progress_bar.progress((page_num + 1) / total_pages)
             met_pag.metric("Páginas Processadas", f"{page_num + 1} / {total_pages}")
             met_os.metric("Ordens Extraídas", str(len(lista_ordens) + (1 if current_writer else 0)))
 
-        # Salva a última ordem pendente se houver
+        # Salva a última ordem que ficou pendente no agrupador ao final do PDF
         if current_writer and current_os_number:
             caminho_saida = os.path.join(OUTPUT_DIR, f"{current_os_number}.pdf")
             with open(caminho_saida, "wb") as f_out:
@@ -210,7 +191,7 @@ if arquivo_carregado is not None:
 
         status_text.empty()
 
-        # Finalização com balões e meme por 5 segundos
+        # Finalização visual
         st.balloons()
         if os.path.exists("meme.jpg"):
             with espaco_meme.container():
@@ -222,7 +203,7 @@ if arquivo_carregado is not None:
 
         st.success(f"🎯 Escaneamento concluído! Total de {len(lista_ordens)} ordens separadas com sucesso.")
 
-        # Download do ZIP
+        # Download
         with open(ZIP_PATH, "rb") as fp:
             st.download_button(
                 label="⬇️ BAIXAR TODAS AS ORDENS EM ZIP",
@@ -233,7 +214,7 @@ if arquivo_carregado is not None:
                 use_container_width=True
             )
 
-        # Relatório de auditoria com tabela
+        # Auditoria Geral
         st.divider()
         st.subheader("📋 Auditoria Geral das Ordens Separadas")
 
