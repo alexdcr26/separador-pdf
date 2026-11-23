@@ -44,6 +44,63 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- CORREÇÃO AUTOMÁTICA DE ROTAÇÃO (HORIZONTAL -> VERTICAL) ---
+def pontuar_texto_os(texto):
+    """Pontua o quão legível está o texto como uma Ordem de Serviço Fogás."""
+    palavras_chave = [
+        "ordem", "manuten", "fog", "página", "pagina",
+        "solicitante", "equipamento", "descri", "relat", "centro", "servi"
+    ]
+    t_lower = texto.lower()
+    pontos = sum(10 for p in palavras_chave if p in t_lower)
+    pontos += len(re.findall(r'[a-zA-Z0-9]{3,}', texto))
+    return pontos
+
+def corrigir_orientacao_e_ler_ocr(img):
+    """
+    Se a imagem estiver na horizontal (paisagem), detecta automaticamente
+    o ângulo correto (90° ou 270° horário) para colocá-la em pé (retrato)
+    e retorna (texto_ocr, angulo_horario_para_pdf).
+    """
+    largura, altura = img.size
+
+    # Se já está em pé (retrato), faz o OCR direto
+    if altura >= largura:
+        texto = pytesseract.image_to_string(img, lang='por')
+        return texto, 0
+
+    # Se está deitada (horizontal), tenta descobrir o ângulo via OSD do Tesseract
+    angulo_detectado = None
+    try:
+        osd = pytesseract.image_to_osd(img)
+        match_rot = re.search(r'Rotate:\s*(\d+)', osd)
+        if match_rot:
+            rot = int(match_rot.group(1))
+            if rot in (90, 270):
+                angulo_detectado = rot
+    except Exception:
+        pass
+
+    if angulo_detectado is not None:
+        img_rot = img.rotate(-angulo_detectado, expand=True)
+        texto = pytesseract.image_to_string(img_rot, lang='por')
+        if pontuar_texto_os(texto) >= 15:
+            return texto, angulo_detectado
+
+    # Fallback garantido: testa 90° horário e 270° horário e escolhe o mais legível
+    img_90 = img.rotate(-90, expand=True)
+    texto_90 = pytesseract.image_to_string(img_90, lang='por')
+    pts_90 = pontuar_texto_os(texto_90)
+
+    img_270 = img.rotate(-270, expand=True)
+    texto_270 = pytesseract.image_to_string(img_270, lang='por')
+    pts_270 = pontuar_texto_os(texto_270)
+
+    if pts_90 >= pts_270:
+        return texto_90, 90
+    else:
+        return texto_270, 270
+
 # --- REGRAS CRITERIOSAS DE OCR ---
 def extrair_numero_os(texto):
     """
@@ -87,7 +144,7 @@ def checar_inicio_ordem(texto):
 
 # --- CABEÇALHO ---
 st.markdown('<div class="main-banner">🔥 Bora Randy, tem que escanear todas as ordens!</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-banner">Motor de separação inteligente com auditoria de páginas e validação anti-mesclagem de OS.</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-banner">Motor de separação inteligente com auto-rotação para retrato, auditoria de páginas e validação anti-mesclagem de OS.</div>', unsafe_allow_html=True)
 
 espaco_meme = st.empty()
 
@@ -114,9 +171,10 @@ if arquivo_carregado is not None:
 
         # Controles visuais
         st.markdown("### ⚙️ Monitor em Tempo Real")
-        col_m1, col_m2 = st.columns(2)
+        col_m1, col_m2, col_m3 = st.columns(3)
         met_pag = col_m1.metric("Páginas Processadas", f"0 / {total_pages}")
         met_os = col_m2.metric("Ordens Extraídas", "0")
+        met_rot = col_m3.metric("Páginas Corrigidas (Retrato)", "0")
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -125,6 +183,7 @@ if arquivo_carregado is not None:
         current_os_number = None
         current_writer = None
         current_page_count = 0
+        paginas_rotacionadas = 0
         lista_ordens = []
 
         # --- LOOP OCR ---
@@ -138,13 +197,16 @@ if arquivo_carregado is not None:
                 last_page=page_num + 1
             )
             
-            texto_ocr = pytesseract.image_to_string(imagens[0], lang='por') if imagens else ""
+            if imagens:
+                texto_ocr, angulo_correcao = corrigir_orientacao_e_ler_ocr(imagens[0])
+            else:
+                texto_ocr, angulo_correcao = "", 0
 
             os_detectada = extrair_numero_os(texto_ocr)
             inicio_confirmado = checar_inicio_ordem(texto_ocr)
 
-            # O sistema corta o documento se encontrar uma nova Página 1 (ou layout de pág 1)
-            # ou se o número da OS mudar. "Fim do relatório" é ignorado na separação.
+            # Corta o documento se encontrar uma nova Página 1 (ou layout de pág 1)
+            # ou se o número da OS mudar.
             nova_ordem_iniciou = (
                 (os_detectada and os_detectada != current_os_number) or 
                 (inicio_confirmado and current_writer is not None)
@@ -160,27 +222,31 @@ if arquivo_carregado is not None:
                         "Total de Páginas": current_page_count,
                         "Tipo de Ordem": "Página Única" if current_page_count == 1 else "Múltiplas Páginas"
                     })
-                # Reseta para iniciar o novo agrupamento
                 current_writer = None
                 current_os_number = None
                 current_page_count = 0
 
-            # Inicializa o agrupador da ordem detectada ou de uma página sem OS aparente
             if current_writer is None:
                 current_os_number = os_detectada if os_detectada else f"OS_DESCONHECIDA_{page_num + 1}"
                 current_writer = PdfWriter()
                 current_page_count = 0
 
-            # Anexa a página atual (Página 1, 2, 3... sempre cairão aqui)
-            current_writer.add_page(reader.pages[page_num])
+            # Ajusta a página do PDF para modo retrato (vertical) se estava na horizontal
+            pagina_pdf = reader.pages[page_num]
+            if angulo_correcao != 0:
+                pagina_pdf.rotate(angulo_correcao)
+                paginas_rotacionadas += 1
+
+            current_writer.add_page(pagina_pdf)
             current_page_count += 1
 
             # Atualização dos mostradores em tela
             progress_bar.progress((page_num + 1) / total_pages)
             met_pag.metric("Páginas Processadas", f"{page_num + 1} / {total_pages}")
             met_os.metric("Ordens Extraídas", str(len(lista_ordens) + (1 if current_writer else 0)))
+            met_rot.metric("Páginas Corrigidas (Retrato)", str(paginas_rotacionadas))
 
-        # Salva a última ordem que ficou pendente no agrupador ao final do PDF
+        # Salva a última ordem pendente
         if current_writer and current_os_number:
             caminho_saida = os.path.join(OUTPUT_DIR, f"{current_os_number}.pdf")
             with open(caminho_saida, "wb") as f_out:
